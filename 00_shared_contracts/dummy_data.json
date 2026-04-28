@@ -1,0 +1,23 @@
+{
+  "game_metadata": {
+    "game_id": "st_10492",
+    "game_name": "Hollow Knight",
+    "primary_genre": "Metroidvania",
+    "price_usd": 15.0,
+    "review_count_sampled": 150,
+    "scrape_timestamp": "2026-04-25T14:30:00Z"
+  },
+  "ml_features": {
+    "gameplay_addictiveness": 0.92,
+    "technical_polish": 0.85,
+    "aesthetic_appeal": 0.95,
+    "narrative_depth": 0.7,
+    "learning_curve_accessibility": 0.6,
+    "community_sentiment": 0.88,
+    "viral_momentum": 0.9
+  },
+  "action_data": {
+    "developer_contact_found": true,
+    "developer_email": "team@teamcherry.com"
+  }
+}
