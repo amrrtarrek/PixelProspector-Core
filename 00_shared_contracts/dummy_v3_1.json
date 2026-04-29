@@ -1,0 +1,23 @@
+{
+  "interaction_metadata": {
+    "user_id": "user_mock_01",
+    "game_id": "st_10492",
+    "timestamp": "2026-04-30T10:00:00Z",
+    "developer_email": "team@teamcherry.com",
+    "primary_genre": "Action RPG"
+  },
+  "game_ml_features": {
+    "gameplay_addictiveness": 0.92,
+    "technical_polish": 0.85,
+    "aesthetic_appeal": 0.95,
+    "narrative_depth": 0.88,
+    "replayability": 0.95,
+    "viral_momentum": 0.90
+  },
+  "user_review_features": {
+    "insight_depth": 0.88,
+    "toxicity_level": 0.05,
+    "genre_expertise": 0.92,
+    "sentiment_consistency": 0.80
+  }
+}

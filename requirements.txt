@@ -5,3 +5,5 @@ pmdarima
 streamlit
 requests
 psycopg2-binary
+SQLAlchemy
+langchain
