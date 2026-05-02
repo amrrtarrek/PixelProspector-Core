@@ -1,9 +1,25 @@
+# ── Core ML & Forecasting ──────────────────────────────────────────────────
 scikit-learn
 scikit-fuzzy
 shap
 pmdarima
+
+# ── Dashboard & Web ────────────────────────────────────────────────────────
 streamlit
-requests
+
+# ── Database ───────────────────────────────────────────────────────────────
 psycopg2-binary
 SQLAlchemy
+
+# ── LLM Providers (Step 1) ─────────────────────────────────────────────────
+openai>=1.0
+google-generativeai
+
+# ── Data & Validation (Step 1) ─────────────────────────────────────────────
+pandas
+pydantic>=2.0
+tqdm
+
+# ── Misc ───────────────────────────────────────────────────────────────────
+requests
 langchain
