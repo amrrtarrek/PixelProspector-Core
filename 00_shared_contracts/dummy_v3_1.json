@@ -1,23 +1,32 @@
 {
   "interaction_metadata": {
-    "user_id": "user_mock_01",
-    "game_id": "st_10492",
-    "timestamp": "2026-04-30T10:00:00Z",
-    "developer_email": "team@teamcherry.com",
-    "primary_genre": "Action RPG"
+    "user_id": "string",
+    "game_id": "string",
+    "timestamp": "ISO-8601 string",
+    "developer_email": "string",
+    "primary_genre": "string",
+    "triage_status": "string (Pass / Rejected)"
   },
   "game_ml_features": {
-    "gameplay_addictiveness": 0.92,
-    "technical_polish": 0.85,
-    "aesthetic_appeal": 0.95,
-    "narrative_depth": 0.88,
-    "replayability": 0.95,
-    "viral_momentum": 0.90
+    "gameplay_addictiveness": 0.0,
+    "technical_polish": 0.0,
+    "aesthetic_appeal": 0.0,
+    "narrative_depth": 0.0,
+    "replayability": 0.0,
+    "viral_momentum": 0.0
   },
   "user_review_features": {
-    "insight_depth": 0.88,
-    "toxicity_level": 0.05,
-    "genre_expertise": 0.92,
-    "sentiment_consistency": 0.80
-  }
+    "insight_depth": 0.0,
+    "toxicity_level": 0.0,
+    "genre_expertise": 0.0,
+    "sentiment_consistency": 0.0
+  },
+  "intelligent_score_signals": {
+    "S_class_severity": 0.0,
+    "Gap_SVM_confidence": 0.0,
+    "mu_geometric_membership": 0.0,
+    "ARIMA_trend_multiplier": 0.0,
+    "SHAP_cosine_similarity": 0.0
+  },
+  "llm_audit_log": "string"
 }
