@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project documentation PDFs (kept locally, not in repo)
+PixelProspector_Architecture_v4.pdf
+PixelProspector_AI_Prompts_v4.pdf
+PixelProspector_Architecture_v4.txt
+PixelProspector_AI_Prompts_v4.txt
