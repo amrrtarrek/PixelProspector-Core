@@ -1,9 +1,14 @@
 """
-PixelProspector — Step 1: Automated Data Ingestion
-====================================================
+PixelProspector — Step 1: Automated Data Ingestion  (V4.0)
+===========================================================
 Reads the offline Kaggle Steam Reviews CSV, sends each row to an LLM
 (OpenAI primary / Gemini fallback) using Structured Outputs, validates
-every field against the V3.1 JSON contract, and writes training_batch.json.
+every field against the V4.0 JSON contract, and writes training_batch.json.
+
+V4.0 changes vs V3.1:
+  - interaction_metadata gains: triage_status
+  - new top-level section: intelligent_score_signals (5 signals, all 0.0 at ingest)
+  - new top-level field:  llm_audit_log (empty string at ingest)
 
 Usage:
     python ingest.py --csv steam_reviews.csv --output training_batch.json
@@ -39,7 +44,7 @@ logging.basicConfig(
 log = logging.getLogger("ingest")
 
 # ---------------------------------------------------------------------------
-# V3.1 Pydantic Models — single source of truth for the JSON contract
+# V4.0 Pydantic Models — single source of truth for the JSON contract
 # ---------------------------------------------------------------------------
 
 def _clamp_float(v: Any) -> float:
@@ -57,6 +62,7 @@ class InteractionMetadata(BaseModel):
     timestamp: str          # ISO-8601
     developer_email: str
     primary_genre: str
+    triage_status: str      # V4.0 new field — "Pass" or "Rejected"
 
     @field_validator("timestamp")
     @classmethod
@@ -67,14 +73,21 @@ class InteractionMetadata(BaseModel):
             raise ValueError(f"timestamp must be ISO-8601: {v}") from exc
         return v
 
+    @field_validator("triage_status")
+    @classmethod
+    def validate_triage(cls, v: str) -> str:
+        if v not in ("Pass", "Rejected"):
+            return "Pass"
+        return v
+
 
 class GameMLFeatures(BaseModel):
     gameplay_addictiveness: float = Field(..., ge=0.0, le=1.0)
-    technical_polish: float      = Field(..., ge=0.0, le=1.0)
-    aesthetic_appeal: float      = Field(..., ge=0.0, le=1.0)
-    narrative_depth: float       = Field(..., ge=0.0, le=1.0)
-    replayability: float         = Field(..., ge=0.0, le=1.0)
-    viral_momentum: float        = Field(..., ge=0.0, le=1.0)
+    technical_polish: float       = Field(..., ge=0.0, le=1.0)
+    aesthetic_appeal: float       = Field(..., ge=0.0, le=1.0)
+    narrative_depth: float        = Field(..., ge=0.0, le=1.0)
+    replayability: float          = Field(..., ge=0.0, le=1.0)
+    viral_momentum: float         = Field(..., ge=0.0, le=1.0)
 
     @model_validator(mode="before")
     @classmethod
@@ -83,9 +96,9 @@ class GameMLFeatures(BaseModel):
 
 
 class UserReviewFeatures(BaseModel):
-    insight_depth: float        = Field(..., ge=0.0, le=1.0)
-    toxicity_level: float       = Field(..., ge=0.0, le=1.0)
-    genre_expertise: float      = Field(..., ge=0.0, le=1.0)
+    insight_depth: float         = Field(..., ge=0.0, le=1.0)
+    toxicity_level: float        = Field(..., ge=0.0, le=1.0)
+    genre_expertise: float       = Field(..., ge=0.0, le=1.0)
     sentiment_consistency: float = Field(..., ge=0.0, le=1.0)
 
     @model_validator(mode="before")
@@ -94,18 +107,36 @@ class UserReviewFeatures(BaseModel):
         return {k: _clamp_float(v) for k, v in data.items()}
 
 
-class V31Contract(BaseModel):
+class IntelligentScoreSignals(BaseModel):
+    """
+    V4.0 — populated to 0.0 at ingest time.
+    Member 3 (live_inference.py) and Member 4 (drift_monitor.py) fill these.
+    """
+    S_class_severity: float        = Field(default=0.0, ge=0.0)
+    Gap_SVM_confidence: float      = Field(default=0.0, ge=0.0, le=1.0)
+    mu_geometric_membership: float = Field(default=0.0, ge=0.0, le=1.0)
+    ARIMA_trend_multiplier: float  = Field(default=0.0)
+    SHAP_cosine_similarity: float  = Field(default=0.0, ge=-1.0, le=1.0)
+
+
+class V40Contract(BaseModel):
     interaction_metadata: InteractionMetadata
     game_ml_features: GameMLFeatures
     user_review_features: UserReviewFeatures
+    intelligent_score_signals: IntelligentScoreSignals = Field(
+        default_factory=IntelligentScoreSignals
+    )
+    llm_audit_log: str = ""    # V4.0 — filled later by Member 5
 
 
 # ---------------------------------------------------------------------------
 # JSON Schema for Structured Outputs (sent to the LLM)
+# NOTE: The LLM only needs to fill the 3 core sections.
+#       intelligent_score_signals and llm_audit_log are added post-parse.
 # ---------------------------------------------------------------------------
 
-V31_JSON_SCHEMA = {
-    "name": "v31_contract",
+V40_JSON_SCHEMA = {
+    "name": "v40_contract",
     "strict": True,
     "schema": {
         "type": "object",
@@ -118,9 +149,10 @@ V31_JSON_SCHEMA = {
                     "timestamp":        {"type": "string"},
                     "developer_email":  {"type": "string"},
                     "primary_genre":    {"type": "string"},
+                    "triage_status":    {"type": "string"},
                 },
                 "required": ["user_id", "game_id", "timestamp",
-                             "developer_email", "primary_genre"],
+                             "developer_email", "primary_genre", "triage_status"],
                 "additionalProperties": False,
             },
             "game_ml_features": {
@@ -162,7 +194,7 @@ V31_JSON_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are a game review analyst for the PixelProspector ML pipeline.
-Given a raw Steam review row, output a JSON object that EXACTLY matches the V3.1
+Given a raw Steam review row, output a JSON object that EXACTLY matches the V4.0
 contract schema. All numeric features MUST be floats strictly between 0.0 and 1.0.
 
 Feature definitions:
@@ -185,6 +217,7 @@ For interaction_metadata:
   - timestamp       : use review timestamp in ISO-8601; default to NOW if missing
   - developer_email : always use "dev-contact@steampublisher.com" (placeholder)
   - primary_genre   : infer from review text or game name; default "Uncategorized"
+  - triage_status   : always set to "Pass" at ingestion time
 """
 
 
@@ -227,7 +260,7 @@ class OpenAIProvider:
             ],
             response_format={
                 "type": "json_schema",
-                "json_schema": V31_JSON_SCHEMA,
+                "json_schema": V40_JSON_SCHEMA,
             },
             temperature=0.1,
             max_tokens=512,
@@ -282,10 +315,9 @@ def get_provider(name: str):
 
 def _heuristic_parse(row: dict) -> dict:
     """
-    Offline heuristic fallback — produces plausible V3.1 data from raw CSV
+    Offline heuristic fallback — produces plausible V4.0 data from raw CSV
     columns without calling any LLM.  Used for --dry-run and unit tests.
     """
-    import re
 
     review_text: str = str(row.get("review", "")).lower()
     recommended = str(row.get("voted_up", row.get("recommended", "true"))).lower()
@@ -342,11 +374,12 @@ def _heuristic_parse(row: dict) -> dict:
 
     return {
         "interaction_metadata": {
-            "user_id":        user_id,
-            "game_id":        f"st_{app_id}",
-            "timestamp":      ts,
+            "user_id":         user_id,
+            "game_id":         f"st_{app_id}",
+            "timestamp":       ts,
             "developer_email": "dev-contact@steampublisher.com",
-            "primary_genre":  "Uncategorized",
+            "primary_genre":   "Uncategorized",
+            "triage_status":   "Pass",   # V4.0 — default at ingest
         },
         "game_ml_features": {
             "gameplay_addictiveness": addictiveness,
@@ -362,6 +395,15 @@ def _heuristic_parse(row: dict) -> dict:
             "genre_expertise":        genre_exp,
             "sentiment_consistency":  sent_cons,
         },
+        # V4.0 — zeroed at ingest; filled by Members 3, 4, 5 at inference time
+        "intelligent_score_signals": {
+            "S_class_severity":        0.0,
+            "Gap_SVM_confidence":      0.0,
+            "mu_geometric_membership": 0.0,
+            "ARIMA_trend_multiplier":  0.0,
+            "SHAP_cosine_similarity":  0.0,
+        },
+        "llm_audit_log": "",   # V4.0 — filled by Member 5
     }
 
 
@@ -373,7 +415,7 @@ def _safe_parse(provider, row: dict, dry_run: bool,
                 max_retries: int = 3, backoff: float = 2.0) -> dict | None:
     """
     Call provider.parse() with exponential back-off retry.
-    Returns validated V31Contract dict or None on failure.
+    Returns validated V40Contract dict or None on failure.
     """
     if dry_run:
         raw = _heuristic_parse(row)
@@ -393,9 +435,19 @@ def _safe_parse(provider, row: dict, dry_run: bool,
             log.error("All %d attempts failed. Last error: %s", max_retries, last_exc)
             return None
 
+        # Inject V4.0 defaults not produced by LLM (signals filled at inference time)
+        raw.setdefault("intelligent_score_signals", {
+            "S_class_severity":        0.0,
+            "Gap_SVM_confidence":      0.0,
+            "mu_geometric_membership": 0.0,
+            "ARIMA_trend_multiplier":  0.0,
+            "SHAP_cosine_similarity":  0.0,
+        })
+        raw.setdefault("llm_audit_log", "")
+
     # Pydantic validation — the strict gate
     try:
-        contract = V31Contract(**raw)
+        contract = V40Contract(**raw)
         return contract.model_dump()
     except Exception as val_exc:
         log.error("Validation failed: %s | raw=%s", val_exc, json.dumps(raw)[:200])
@@ -434,8 +486,6 @@ def run_ingestion(
     min_delay = 1.0 / rate_limit_rps if rate_limit_rps > 0 else 0.0
 
     with tqdm(total=total, unit="review", desc="Ingesting") as pbar:
-        batch: list[dict] = []
-
         for _, row in df.iterrows():
             row_dict = row.to_dict()
             t0 = time.monotonic()
@@ -481,12 +531,176 @@ def _write_output(path: Path, records: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Live user-review path  (Flow B — Gemini converts free text → V4.0 JSON)
+# ---------------------------------------------------------------------------
+
+# A dedicated system prompt for user-submitted free-text reviews.
+# Differs from the batch prompt: it clarifies that inputs are from end-users,
+# not raw CSV rows, so Gemini adapts its feature interpretation accordingly.
+USER_REVIEW_SYSTEM_PROMPT = """You are a game review analyst for the PixelProspector ML pipeline.
+A real user has submitted a free-text game review through our platform.
+Your job is to read their review and convert it into a structured JSON object
+that EXACTLY matches the V4.0 contract schema.
+
+All numeric features MUST be floats strictly between 0.0 and 1.0.
+Base your scores ONLY on evidence in the review text — do not invent signals.
+
+Feature definitions:
+  game_ml_features:
+    gameplay_addictiveness : How addictive/engaging the gameplay loop sounds (0=boring, 1=irresistible)
+    technical_polish       : Crash/bug/performance mentions (0=broken, 1=flawless)
+    aesthetic_appeal       : Visual/audio praise (0=ugly, 1=stunning)
+    narrative_depth        : Story/lore richness (0=none, 1=epic)
+    replayability          : Replay value, hours played, multiple playthroughs (0=none, 1=infinite)
+    viral_momentum         : Social buzz, recommendations, community hype (0=none, 1=viral)
+  user_review_features:
+    insight_depth          : How analytical and detailed the review is (0=gibberish, 1=expert analysis)
+    toxicity_level         : Hate speech, harassment, slurs (0=clean, 1=highly toxic)
+    genre_expertise        : Evidence reviewer knows the genre (0=novice, 1=expert)
+    sentiment_consistency  : Does their text match their recommendation? (0=contradictory, 1=perfectly aligned)
+
+For interaction_metadata:
+  - triage_status : Set to "Pass". (Member 5's triage gate will update this if needed.)
+"""
+
+
+def parse_user_review(
+    review_text: str,
+    game_name:   str,
+    game_id:     str,
+    user_id:     str,
+    recommended: bool,
+    genre:       str = "Uncategorized",
+    dry_run:     bool = False,
+) -> dict | None:
+    """
+    Flow B — Live user review submission.
+
+    Convert a free-text review submitted through the dashboard into a fully
+    validated V4.0 JSON contract using Gemini Structured Outputs, then return
+    the dict ready to be written to PostgreSQL.
+
+    Falls back to the heuristic parser automatically when:
+      - ``dry_run=True`` is passed, OR
+      - ``GEMINI_API_KEY`` environment variable is not set.
+
+    Parameters
+    ----------
+    review_text : str   The user's written review.
+    game_name   : str   Human-readable game title (e.g. "The Witcher 3").
+    game_id     : str   Prefixed Steam ID (e.g. "st_292030").
+    user_id     : str   Reviewer identifier (username, email hash, etc.).
+    recommended : bool  Whether the reviewer recommends the game.
+    genre       : str   Primary genre label (optional, defaults to "Uncategorized").
+    dry_run     : bool  If True, skip Gemini and use the heuristic fallback.
+
+    Returns
+    -------
+    dict | None  Validated V4.0 contract dict, or None on unrecoverable failure.
+    """
+    # Build a row dict that mirrors Kaggle CSV column names so that
+    # _build_user_prompt() and _heuristic_parse() work unchanged.
+    row: dict = {
+        "app_name":            game_name,
+        "app_id":              game_id.replace("st_", ""),   # strip prefix for schema
+        "author.steamid":      user_id,
+        "voted_up":            str(recommended).lower(),
+        "author.playtime_forever": "0",                      # unknown for live reviews
+        "timestamp_created":   "",                            # will default to NOW
+        "review":              review_text,
+    }
+
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    use_heuristic = dry_run or not gemini_key
+
+    if use_heuristic:
+        if not dry_run:
+            log.warning(
+                "GEMINI_API_KEY not set — falling back to heuristic parser. "
+                "Set the key to enable real Gemini analysis."
+            )
+        raw = _heuristic_parse(row)
+    else:
+        # Override the system prompt with the user-review-specific one
+        original_prompt = SYSTEM_PROMPT
+        try:
+            # Temporarily patch the module-level prompt for this call
+            import ingest as _self
+            _self.SYSTEM_PROMPT = USER_REVIEW_SYSTEM_PROMPT  # type: ignore[attr-defined]
+        except Exception:
+            pass  # running as __main__, module-level var is already in scope
+
+        provider = GeminiProvider()
+
+        last_exc: Exception | None = None
+        raw = None
+        for attempt in range(1, 4):
+            try:
+                raw = provider.parse(row)
+                break
+            except Exception as exc:
+                last_exc = exc
+                wait = 2.0 ** attempt
+                log.warning("Gemini attempt %d/3 failed (%s). Retrying in %.1fs…",
+                            attempt, exc, wait)
+                time.sleep(wait)
+
+        # Restore original prompt
+        try:
+            _self.SYSTEM_PROMPT = original_prompt  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        if raw is None:
+            log.error("All Gemini attempts failed: %s. Falling back to heuristic.", last_exc)
+            raw = _heuristic_parse(row)
+
+    # Override / patch metadata that the LLM might get wrong
+    raw.setdefault("interaction_metadata", {})
+    raw["interaction_metadata"]["game_id"]        = game_id
+    raw["interaction_metadata"]["user_id"]        = user_id
+    raw["interaction_metadata"]["primary_genre"]  = genre
+    raw["interaction_metadata"]["triage_status"]  = "Pass"
+    raw["interaction_metadata"].setdefault(
+        "developer_email", "dev-contact@steampublisher.com"
+    )
+    if not raw["interaction_metadata"].get("timestamp"):
+        raw["interaction_metadata"]["timestamp"] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+
+    # Inject V4.0 defaults for signals (filled by Members 3/4/5 at inference)
+    raw["intelligent_score_signals"] = {
+        "S_class_severity":        0.0,
+        "Gap_SVM_confidence":      0.0,
+        "mu_geometric_membership": 0.0,
+        "ARIMA_trend_multiplier":  0.0,
+        "SHAP_cosine_similarity":  0.0,
+    }
+    raw["llm_audit_log"] = ""
+
+    # Pydantic strict validation — same gate as the batch pipeline
+    try:
+        contract = V40Contract(**raw)
+        result = contract.model_dump()
+        log.info(
+            "parse_user_review OK | game=%s user=%s triage=%s",
+            game_id, user_id, result["interaction_metadata"]["triage_status"],
+        )
+        return result
+    except Exception as val_exc:
+        log.error("V4.0 validation failed for user review: %s | raw=%s",
+                  val_exc, json.dumps(raw)[:300])
+        return None
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="PixelProspector Step 1 — Data Ingestion",
+        description="PixelProspector Step 1 — Data Ingestion (V4.0)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--csv",          type=Path, default=Path("steam_reviews.csv"),
