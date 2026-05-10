@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,11 @@ class InteractionMetadata(BaseModel):
 
 
 class GameMLFeatures(BaseModel):
+    """
+    V4.0 — strict boundary enforcement per QA contract.
+    Values outside [0.0, 1.0] raise a ValidationError so bad LLM
+    outputs are loudly rejected, not silently clamped.
+    """
     gameplay_addictiveness: float = Field(..., ge=0.0, le=1.0)
     technical_polish: float       = Field(..., ge=0.0, le=1.0)
     aesthetic_appeal: float       = Field(..., ge=0.0, le=1.0)
@@ -89,22 +94,17 @@ class GameMLFeatures(BaseModel):
     replayability: float          = Field(..., ge=0.0, le=1.0)
     viral_momentum: float         = Field(..., ge=0.0, le=1.0)
 
-    @model_validator(mode="before")
-    @classmethod
-    def clamp_all(cls, data: dict) -> dict:
-        return {k: _clamp_float(v) for k, v in data.items()}
-
 
 class UserReviewFeatures(BaseModel):
+    """
+    V4.0 — strict boundary enforcement per QA contract.
+    Values outside [0.0, 1.0] raise a ValidationError so bad LLM
+    outputs are loudly rejected, not silently clamped.
+    """
     insight_depth: float         = Field(..., ge=0.0, le=1.0)
     toxicity_level: float        = Field(..., ge=0.0, le=1.0)
     genre_expertise: float       = Field(..., ge=0.0, le=1.0)
     sentiment_consistency: float = Field(..., ge=0.0, le=1.0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def clamp_all(cls, data: dict) -> dict:
-        return {k: _clamp_float(v) for k, v in data.items()}
 
 
 class IntelligentScoreSignals(BaseModel):
