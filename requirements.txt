@@ -3,6 +3,7 @@ scikit-learn
 scikit-fuzzy
 shap
 pmdarima
+faiss-cpu
 
 # ── Dashboard & Web ────────────────────────────────────────────────────────
 streamlit
@@ -23,3 +24,6 @@ tqdm
 # ── Misc ───────────────────────────────────────────────────────────────────
 requests
 langchain
+
+# ── Testing ────────────────────────────────────────────────────────────────
+pytest
