@@ -6,6 +6,37 @@ import json
 import faiss
 import google.generativeai as genai
 from typing import Any, List, Optional, Dict
+from pathlib import Path
+
+# ── Resolve project root so sub-member imports work regardless of CWD ──────
+_HERE         = Path(__file__).resolve().parent          # 05_fastapi_agent/core/
+_PROJECT_ROOT = _HERE.parent.parent                      # PixelProspector-Core/
+
+# Add member directories to path
+for _p in ["01_data_ingestion", "03_supervised_ml", "04_forecasting"]:
+    _full = str(_PROJECT_ROOT / _p)
+    if _full not in sys.path:
+        sys.path.insert(0, _full)
+
+# ── Import Member 3 (InferenceEngine) ─────────────────────────────────────
+try:
+    from live_inference import InferenceEngine  # type: ignore
+    _inference_engine = InferenceEngine()
+except Exception as _ie_err:
+    logging.getLogger("PixelOrchestrator").warning(
+        "InferenceEngine unavailable (%s). Signals will default to 0.", _ie_err
+    )
+    _inference_engine = None
+
+# ── Import Member 4 (ARIMAForecaster) ─────────────────────────────────────
+try:
+    from drift_monitor import ARIMAForecaster  # type: ignore
+    _arima_forecaster = ARIMAForecaster()
+except Exception as _arima_err:
+    logging.getLogger("PixelOrchestrator").warning(
+        "ARIMAForecaster unavailable (%s). ARIMA signal will default to 1.0.", _arima_err
+    )
+    _arima_forecaster = None
 
 # LangChain Imports
 try:
@@ -43,7 +74,11 @@ class PixelGeminiLLM:
     Auto-scans for available models to avoid 404 errors.
     """
     def __init__(self, api_key):
-        genai.configure(api_key=api_key)
+        # Fallback: read from environment if caller passed None
+        resolved_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not resolved_key:
+            logger.warning("PixelGeminiLLM: No API key found. LLM calls will fail.")
+        genai.configure(api_key=resolved_key)
         self.model_name = self._get_active_model_name()
         self.model = genai.GenerativeModel(self.model_name)
 
@@ -98,15 +133,57 @@ class PixelProspectorOrchestrator:
             data["interaction_metadata"]["triage_status"] = "Pass"
         return "Pass"
 
+    def compute_live_signals(self, payload: dict) -> dict:
+        """
+        Orchestrates Member 3 (InferenceEngine) and Member 4 (ARIMAForecaster)
+        to compute all 5 real Intelligent Score signals and write them back
+        into the payload's intelligent_score_signals block.
+        Returns the filled signals dict.
+        """
+        signals = payload.setdefault("intelligent_score_signals", {})
+
+        # ── Member 3: Signals 1, 2, 3, 5 ─────────────────────────────────
+        if _inference_engine is not None:
+            try:
+                result = _inference_engine.compute_signals(payload)
+                m3_signals = result.get("intelligent_score_signals", {})
+                signals["S_class_severity"]        = m3_signals.get("S_class_severity", 0.0)
+                signals["Gap_SVM_confidence"]      = m3_signals.get("Gap_SVM_confidence", 0.0)
+                signals["mu_geometric_membership"] = m3_signals.get("mu_geometric_membership", 0.0)
+                signals["SHAP_cosine_similarity"]  = m3_signals.get("SHAP_cosine_similarity", 0.0)
+                logger.info(
+                    "Member 3 signals → S=%.3f Gap=%.3f Mu=%.3f SHAP=%.3f",
+                    signals["S_class_severity"], signals["Gap_SVM_confidence"],
+                    signals["mu_geometric_membership"], signals["SHAP_cosine_similarity"],
+                )
+            except Exception as exc:
+                logger.error("Member 3 inference failed: %s. Signals remain 0.", exc)
+        else:
+            logger.warning("InferenceEngine not loaded — signals 1-3,5 will be 0.")
+
+        # ── Member 4: Signal 4 (ARIMA) ────────────────────────────────────
+        if _arima_forecaster is not None:
+            try:
+                arima_mult = _arima_forecaster.fit_and_forecast()
+                signals["ARIMA_trend_multiplier"] = arima_mult
+                logger.info("Member 4 ARIMA multiplier → %.3f", arima_mult)
+            except Exception as exc:
+                logger.error("Member 4 ARIMA failed: %s. Defaulting to 1.0.", exc)
+                signals["ARIMA_trend_multiplier"] = 1.0
+        else:
+            signals.setdefault("ARIMA_trend_multiplier", 1.0)
+
+        return signals
+
     def get_intelligent_score(self, signals: dict):
         """The 5-Signal Intelligent Score calculation. Output is clamped to [0.0, 1.0]."""
         # Standardize names from V4.0 contract
-        s = signals.get("S_dynamic") or signals.get("S_class_severity", 0.0)
-        gap = signals.get("Gap_SVM") or signals.get("Gap_SVM_confidence", 0.0)
-        mu = signals.get("Mu_geometric") or signals.get("mu_geometric_membership", 0.0)
-        arima = signals.get("ARIMA_multiplier") or signals.get("ARIMA_trend_multiplier", 1.0)
-        shap_cos = signals.get("SHAP_cosine") or signals.get("SHAP_cosine_similarity", 0.0)
-        
+        s        = signals.get("S_class_severity", 0.0)
+        gap      = signals.get("Gap_SVM_confidence", 0.0)
+        mu       = signals.get("mu_geometric_membership", 0.0)
+        arima    = signals.get("ARIMA_trend_multiplier", 1.0)
+        shap_cos = signals.get("SHAP_cosine_similarity", 0.0)
+
         # Weighted formula
         raw_score = (s * 0.4) + (gap * 0.2) + (mu * 0.1) + (arima * 0.2) + (shap_cos * 0.1)
 

@@ -271,7 +271,7 @@ class OpenAIProvider:
 class GeminiProvider:
     """Uses google-generativeai with response_mime_type + response_schema."""
 
-    def __init__(self, model: str = "gemini-1.5-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash"):
         try:
             import google.generativeai as genai  # type: ignore
         except ImportError as exc:
@@ -284,17 +284,25 @@ class GeminiProvider:
         self.genai = genai
 
     def parse(self, row: dict) -> dict:
+        import re
         model = self.genai.GenerativeModel(
             model_name=self.model_name,
             system_instruction=SYSTEM_PROMPT,
             generation_config=self.genai.GenerationConfig(
                 response_mime_type="application/json",
                 temperature=0.1,
-                max_output_tokens=512,
+                max_output_tokens=1024,
             ),
         )
         response = model.generate_content(_build_user_prompt(row))
-        return json.loads(response.text)
+        raw_text = response.text
+
+        # gemini-2.5-flash may prepend thinking tokens before the JSON block.
+        # Extract the first {...} JSON object robustly.
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        return json.loads(raw_text)
 
 
 def get_provider(name: str):

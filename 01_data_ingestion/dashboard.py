@@ -364,20 +364,57 @@ with tab_submit:
                     if result is None:
                         st.error("❌ Analysis failed — could not produce a valid V4.0 contract. Check logs.")
                     else:
-                        # Write to DB (will fail gracefully if DB is not connected)
+                        # Forward payload to FastAPI Agent so it calculates the 5 signals
                         db_msg = ""
+                        res_data = {}
                         try:
-                            engine = get_engine()
-                            new_id = write_record(result, engine)
-                            db_msg = f"✅ **Saved to database — Row #{new_id}**"
+                            import requests
+                            res = requests.post("http://localhost:8000/v1/predict", json=result, timeout=15)
+
+                            if res.status_code == 200:
+                                res_data = res.json()
+                                new_id = res_data.get("db_id", "?")
+                                score  = res_data.get("intelligent_score", 0.0)
+                                path   = res_data.get("decision_path", "Unknown")
+                                db_msg = f"✅ **Processed & Saved!** (Row #{new_id}) | Score: **{score:.3f}** | Path: **{path}**"
+
+                                # Merge real signals back into the displayed contract
+                                if "intelligent_score_signals" in result:
+                                    # Re-fetch the live record from DB to get real signals
+                                    # (FastAPI updated the DB; we patch the display dict here)
+                                    result["intelligent_score_signals"] = {
+                                        "S_class_severity":        res_data.get("signals", {}).get("S_class_severity", result["intelligent_score_signals"].get("S_class_severity", 0)),
+                                        "Gap_SVM_confidence":      res_data.get("signals", {}).get("Gap_SVM_confidence", result["intelligent_score_signals"].get("Gap_SVM_confidence", 0)),
+                                        "mu_geometric_membership": res_data.get("signals", {}).get("mu_geometric_membership", result["intelligent_score_signals"].get("mu_geometric_membership", 0)),
+                                        "ARIMA_trend_multiplier":  res_data.get("signals", {}).get("ARIMA_trend_multiplier", result["intelligent_score_signals"].get("ARIMA_trend_multiplier", 0)),
+                                        "SHAP_cosine_similarity":  res_data.get("signals", {}).get("SHAP_cosine_similarity", result["intelligent_score_signals"].get("SHAP_cosine_similarity", 0)),
+                                    }
+                                result["llm_audit_log"] = res_data.get("llm_audit_log", "")
+                            else:
+                                db_msg = f"⚠️ Inference failed (HTTP {res.status_code}: {res.text})."
+
                             st.cache_data.clear()   # force Zone 2 Tab 1 to reload
-                        except Exception as db_err:
-                            db_msg = f"⚠️ DB write skipped ({db_err}). JSON shown below is still valid."
+                        except Exception as req_err:
+                            db_msg = f"⚠️ API call failed ({req_err}). Is the FastAPI server running on port 8000?"
 
                         st.success(db_msg if db_msg else "✅ Analysis complete")
 
-                        # Show the resulting V4.0 contract so user can inspect it
-                        with st.expander("📄 View V4.0 JSON output", expanded=True):
+                        # Show inference results panel if we got a real response
+                        if res_data and res_data.get("intelligent_score") is not None:
+                            st.markdown("---")
+                            st.markdown("#### 🧠 Inference Results")
+                            r1, r2, r3 = st.columns(3)
+                            r1.metric("Intelligent Score", f"{res_data.get('intelligent_score', 0):.4f}")
+                            r2.metric("Decision Path",     res_data.get("decision_path", "—"))
+                            r3.metric("DB Row",            f"#{res_data.get('db_id', '?')}")
+
+                            if res_data.get("agents"):
+                                with st.expander("🤖 Agent Outputs", expanded=False):
+                                    st.markdown(f"**Community Agent:** {res_data['agents'].get('community', '—')}")
+                                    st.markdown(f"**Investor Agent:** {res_data['agents'].get('investor', '—')}")
+
+                        # Show the V4.0 contract with real signals merged in
+                        with st.expander("📄 View V4.0 JSON output (with real signals)", expanded=True):
                             import json as _json
                             st.json(_json.dumps(result, indent=2))
 
@@ -385,6 +422,14 @@ with tab_submit:
                         gf = result.get("game_ml_features", {})
                         uf = result.get("user_review_features", {})
                         all_scores = {**gf, **uf}
+                        if all_scores:
+                            score_df = pd.DataFrame(
+                                list(all_scores.values()),
+                                index=list(all_scores.keys()),
+                                columns=["Score"],
+                            )
+                            st.caption("Feature scores (all should be in [0.0 – 1.0])")
+                            st.bar_chart(score_df)
                         if all_scores:
                             score_df = pd.DataFrame(
                                 list(all_scores.values()),

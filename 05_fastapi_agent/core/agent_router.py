@@ -1,25 +1,26 @@
 import os
+import sys
 import logging
 import faiss
 import numpy as np
-from fastapi import FastAPI, HTTPException
-from typing import Dict
+from fastapi import FastAPI
+from pathlib import Path
 
-import sys
-import os
-import importlib
+# ── Resolve project root & add member directories to path ──────────────────
+_HERE         = Path(__file__).resolve().parent          # 05_fastapi_agent/core/
+_PROJECT_ROOT = _HERE.parent.parent                      # PixelProspector-Core/
 
-# Add project root to sys.path
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+for _p in ["01_data_ingestion", "03_supervised_ml", "04_forecasting"]:
+    _full = str(_PROJECT_ROOT / _p)
+    if _full not in sys.path:
+        sys.path.insert(0, _full)
 
-# Import DB using importlib
+# ── Import Member 1 DB write helper ───────────────────────────────────
 try:
-    db_module = importlib.import_module("01_data_ingestion.db")
-    write_record = db_module.write_record
+    from db import write_record  # type: ignore
 except ImportError:
-    # Fallback to a no-op or simple print if DB is missing
-    def write_record(data):
-        print(f"[MOCK DB] Record written for {data.get('interaction_metadata', {}).get('game_id')}")
+    def write_record(data, engine=None):
+        print(f"[MOCK DB] write_record called for {data.get('interaction_metadata', {}).get('game_id')}")
         return 999
 
 from core.multi_agent_system import PixelProspectorOrchestrator
@@ -35,6 +36,9 @@ app = FastAPI(title="PixelProspector V4.0 Orchestrator")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Member5-Main")
 
+# In-memory ring buffer for Zone 3 dashboard (last 50 decisions)
+_recent_actions: list = []
+
 # Initialize the Brain (Member 5 Orchestrator)
 orchestrator = PixelProspectorOrchestrator(api_key=API_KEY, faiss_index_path=FAISS_INDEX_PATH)
 
@@ -47,8 +51,18 @@ def load_faiss_index():
 index = load_faiss_index()
 
 @app.get("/")
-async def health():
+async def root():
     return {"status": "online", "system": "PixelProspector V4.0"}
+
+@app.get("/health")
+async def health():
+    return {"status": "online", "system": "PixelProspector V4.0", "version": "4.1"}
+
+@app.get("/recent_actions")
+async def recent_actions():
+    """Return the last N ReAct router decisions for the dashboard Zone 3."""
+    return _recent_actions
+
 
 @app.post("/v1/predict")
 async def predict_game_success(payload: dict):
@@ -64,10 +78,10 @@ async def predict_game_success(payload: dict):
             "db_id": payload.get("interaction_metadata", {}).get("db_id", "Logged")
         }
 
-    # 2. Receive & Calculate 5-Signal Intelligent Score
-    signals = payload.get("intelligent_score_signals", {})
+    # 2. Compute all 5 signals via Members 3 (SVM/SHAP) and 4 (ARIMA)
+    signals = orchestrator.compute_live_signals(payload)
     intelligent_score = orchestrator.get_intelligent_score(signals)
-    shap_cosine = signals.get("SHAP_cosine") or signals.get("SHAP_cosine_similarity", 0.0)
+    shap_cosine = signals.get("SHAP_cosine_similarity", 0.0)
 
     # 3. The 7-Path ReAct Router
     decision_path = orchestrator.react_router(intelligent_score, shap_cosine)
@@ -99,14 +113,27 @@ async def predict_game_success(payload: dict):
     payload["investor_pitch"] = investor_pitch
     row_id = write_record(payload)
 
-    return {
+    result = {
         "db_id": row_id,
         "intelligent_score": intelligent_score,
         "decision_path": decision_path,
         "llm_audit_log": payload["llm_audit_log"],
+        "signals": signals,   # ← real computed signals for dashboard display
         "agents": {
             "community": community_profile,
             "investor": investor_pitch
         },
         "action_plan": final_action
-    }
+    }
+
+    # Append to Zone 3 ring buffer (keep last 50)
+    _recent_actions.append({
+        "game_id": payload.get("interaction_metadata", {}).get("game_id", "?"),
+        "decision_path": decision_path,
+        "intelligent_score": round(intelligent_score, 4),
+        "db_id": row_id,
+    })
+    if len(_recent_actions) > 50:
+        _recent_actions.pop(0)
+
+    return result
