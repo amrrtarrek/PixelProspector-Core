@@ -92,9 +92,9 @@ export default function App() {
     cosine: action.shap_cosine
   }));
 
-  const totalLogs = logs.length;
-  const passCount = logs.filter(l => l.interaction_metadata?.triage_status === 'Pass').length;
-  const passRatio = totalLogs > 0 ? ((passCount / totalLogs) * 100).toFixed(1) : 0;
+  const totalActions = recentActions.length;
+  const passCount = recentActions.filter(a => a.intelligent_score >= 0.7).length;
+  const passRatio = totalActions > 0 ? ((passCount / totalActions) * 100).toFixed(1) : 0;
 
   return (
     <div style={{ minHeight: '100vh', padding: '2rem' }}>
@@ -116,20 +116,20 @@ export default function App() {
           </h2>
           <div style={{ marginBottom: '1rem' }}>
             <h3 style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>GAME FEATURES (AVG)</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.875rem' }}>
-              {Object.entries(health.game_features).slice(0, 4).map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{k.split('_')[0]}:</span> <strong>{v}</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
+              {Object.entries(health.game_features).map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k}>{k}:</span> <strong>{v}</strong>
                 </div>
               ))}
             </div>
           </div>
           <div>
             <h3 style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>USER FEATURES (AVG)</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.875rem' }}>
-              {Object.entries(health.user_features).slice(0, 4).map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{k.split('_')[0]}:</span> <strong>{v}</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
+              {Object.entries(health.user_features).map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k}>{k}:</span> <strong>{v}</strong>
                 </div>
               ))}
             </div>
@@ -147,7 +147,7 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
             <div className="nm-badge text-success">Pass: {passCount}</div>
-            <div className="nm-badge text-danger">Reject: {totalLogs - passCount}</div>
+            <div className="nm-badge text-danger">Reject: {totalActions - passCount}</div>
           </div>
         </div>
 

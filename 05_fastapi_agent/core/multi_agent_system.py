@@ -278,7 +278,11 @@ class PixelProspectorOrchestrator:
 
     def investor_agent(self, score: float, explanation: str, game_name: str, investor_name: str):
         """[BONUS] Multi-Agent: Investor Scouting Agent."""
-        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}'. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
+        if score >= 0.7:
+            template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}' pitching this game as a STRONG investment opportunity. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
+        else:
+            template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional internal memo or email draft to send to investor '{investor_name}' explaining why this game is a POOR investment and should be AVOIDED. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
+
         prompt = PromptTemplate.from_template(template).format(
             score=score, 
             explanation=explanation,
@@ -329,8 +333,11 @@ class PixelProspectorOrchestrator:
                     logger.error(f"Failed to send email: {e}")
                     return False
             
-            logger.info("Triggering background email send...")
-            send_email_via_smtp(investor_email, subject, email_content)
-            logger.info("Email send process finished.")
+            if score >= 0.7:
+                logger.info("Game score is high enough. Triggering background email send...")
+                send_email_via_smtp(investor_email, subject, email_content)
+                logger.info("Email send process finished.")
+            else:
+                logger.info("Game score is too low (%.3f < 0.7). Skipping actual SMTP email send.", score)
             
         return email_content
