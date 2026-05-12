@@ -312,7 +312,7 @@ def get_provider(name: str):
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         return OpenAIProvider(model=model)
     if name == "gemini":
-        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+        model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
         return GeminiProvider(model=model)
     raise ValueError(f"Unknown provider: {name!r}. Choose 'openai' or 'gemini'.")
 

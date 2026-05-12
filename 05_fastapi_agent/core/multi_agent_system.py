@@ -83,15 +83,7 @@ class PixelGeminiLLM:
         self.model = genai.GenerativeModel(self.model_name)
 
     def _get_active_model_name(self):
-        try:
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            for pref in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
-                for m in models:
-                    if pref in m:
-                        return m
-            return models[0] if models else "gemini-1.5-flash"
-        except:
-            return "gemini-1.5-flash"
+        return "gemini-3.1-flash-lite"
 
     def invoke(self, prompt: str) -> str:
         try:
@@ -275,6 +267,6 @@ class PixelProspectorOrchestrator:
 
     def investor_agent(self, score: float, explanation: str):
         """[BONUS] Multi-Agent: Investor Scouting Agent."""
-        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a 2-sentence investment pitch."
+        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investors pitching this game. Include a 'Subject:' line and a formal sign-off."
         prompt = PromptTemplate.from_template(template).format(score=score, explanation=explanation)
         return self.llm.invoke(prompt)

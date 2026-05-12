@@ -5,6 +5,17 @@ import faiss
 import numpy as np
 from fastapi import FastAPI
 from pathlib import Path
+from datetime import datetime, timezone
+
+# ── Auto-load .env from the 05_fastapi_agent directory ──────────────────────
+try:
+    from dotenv import load_dotenv  # pip install python-dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(dotenv_path=_env_path, override=True)
+        print(f"[startup] Loaded .env from {_env_path}")
+except ImportError:
+    pass  # python-dotenv not installed; fall back to OS env vars
 
 # ── Resolve project root & add member directories to path ──────────────────
 _HERE         = Path(__file__).resolve().parent          # 05_fastapi_agent/core/
@@ -128,10 +139,13 @@ async def predict_game_success(payload: dict):
 
     # Append to Zone 3 ring buffer (keep last 50)
     _recent_actions.append({
-        "game_id": payload.get("interaction_metadata", {}).get("game_id", "?"),
-        "decision_path": decision_path,
+        "timestamp":        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "game_id":          payload.get("interaction_metadata", {}).get("game_id", "?"),
+        "decision_path":    decision_path,
         "intelligent_score": round(intelligent_score, 4),
-        "db_id": row_id,
+        "shap_cosine":      round(shap_cosine, 4),
+        "action_plan":      str(final_action)[:120],   # truncate for table display
+        "db_id":            row_id,
     })
     if len(_recent_actions) > 50:
         _recent_actions.pop(0)

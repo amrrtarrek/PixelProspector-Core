@@ -31,6 +31,10 @@ import pandas as pd
 import requests
 import streamlit as st
 
+# Force-override OS environment if Streamlit secrets contains the key
+if "GEMINI_API_KEY" in st.secrets:
+    os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+
 # ---------------------------------------------------------------------------
 # Page config — must be first Streamlit call
 # ---------------------------------------------------------------------------
@@ -369,7 +373,7 @@ with tab_submit:
                         res_data = {}
                         try:
                             import requests
-                            res = requests.post("http://localhost:8000/v1/predict", json=result, timeout=15)
+                            res = requests.post("http://localhost:8000/v1/predict", json=result, timeout=60)
 
                             if res.status_code == 200:
                                 res_data = res.json()
@@ -409,9 +413,10 @@ with tab_submit:
                             r3.metric("DB Row",            f"#{res_data.get('db_id', '?')}")
 
                             if res_data.get("agents"):
-                                with st.expander("🤖 Agent Outputs", expanded=False):
+                                with st.expander("🤖 Agent Outputs", expanded=True):
                                     st.markdown(f"**Community Agent:** {res_data['agents'].get('community', '—')}")
-                                    st.markdown(f"**Investor Agent:** {res_data['agents'].get('investor', '—')}")
+                                    st.markdown("**Investor Agent (Email Draft):**")
+                                    st.info(res_data['agents'].get('investor', '—'))
 
                         # Show the V4.0 contract with real signals merged in
                         with st.expander("📄 View V4.0 JSON output (with real signals)", expanded=True):
@@ -454,16 +459,33 @@ st.markdown('<p class="zone-title">⚡ Zone 3 · Action Dispatch</p>', unsafe_al
 api_col, status_col = st.columns([3, 1])
 with api_col:
     st.caption("Recent ReAct router decisions (from Member 5 FastAPI)")
+    _api_online = api_status.get("status") not in ("offline", "unreachable")
     try:
-        recent_actions = requests.get(f"{FASTAPI_URL}/recent_actions",
-                                      timeout=3).json()
+        recent_resp = requests.get(f"{FASTAPI_URL}/recent_actions", timeout=3)
+        recent_actions = recent_resp.json() if recent_resp.status_code == 200 else []
         if isinstance(recent_actions, list) and recent_actions:
             action_df = pd.DataFrame(recent_actions)
+            # Reorder columns for readability if they exist
+            preferred_cols = ["timestamp", "game_id", "decision_path",
+                              "intelligent_score", "shap_cosine", "action_plan", "db_id"]
+            action_df = action_df[[c for c in preferred_cols if c in action_df.columns]]
             st.dataframe(action_df, use_container_width=True, height=200)
+            st.caption(f"Showing {len(recent_actions)} most recent router decisions.")
+        elif _api_online:
+            st.info(
+                "🟡 FastAPI is **online** but no predictions have been routed yet. "
+                "Submit a review in Zone 2 → Tab 'Submit New Review' to trigger the ReAct router."
+            )
         else:
-            st.info("No recent actions from the agent router. Is Member 5 running?")
-    except Exception:
-        st.info("Agent router is offline or not yet implemented.")
+            st.warning("Agent router is offline. Start the FastAPI server first.")
+    except Exception as _z3_err:
+        if _api_online:
+            st.info(
+                "🟡 FastAPI is **online** but `/recent_actions` returned an error. "
+                f"Details: `{_z3_err}`"
+            )
+        else:
+            st.warning("Agent router is offline or not yet implemented.")
 
 with status_col:
     st.caption("FastAPI Status")
@@ -471,6 +493,7 @@ with status_col:
         st.success(f"🟢 Online\n\n`{api_status.get('status', 'ok')}`")
     else:
         st.error(f"🔴 {api_status.get('status', 'offline').title()}")
+
 
 st.markdown('</div>', unsafe_allow_html=True)
 
