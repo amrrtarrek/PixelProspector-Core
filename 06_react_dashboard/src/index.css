@@ -1,0 +1,228 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@100..800&display=swap');
+
+:root {
+  /* Light Mode Tokens from UI.md */
+  --primary: #006666;
+  --secondary: #F1F2F5;
+  --success: #00A63D;
+  --warning: #FE9900;
+  --danger: #FF2157;
+  --info: #0ea5e9;
+  
+  --surface: #E7E5E4; /* Neutral warm surface */
+  --text: #1E2938;
+  --text-muted: #64748B;
+  
+  /* Neumorphism Shadows for Light Mode */
+  --shadow-light: #F8F7F6; /* Lighter than surface */
+  --shadow-dark: #CFCBC8;  /* Darker than surface */
+  
+  --nm-flat: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+  --nm-pressed: inset 6px 6px 12px var(--shadow-dark), inset -6px -6px 12px var(--shadow-light);
+  --nm-convex: linear-gradient(145deg, var(--shadow-light), var(--shadow-dark));
+  --nm-concave: linear-gradient(145deg, var(--shadow-dark), var(--shadow-light));
+  
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+}
+
+.dark {
+  /* Dark Mode Tokens */
+  --primary: #00cccc;
+  --secondary: #1E293B;
+  --success: #00E655;
+  --warning: #FFB340;
+  --danger: #FF4D79;
+  --info: #38bdf8;
+  
+  --surface: #121822; /* Dark cool surface */
+  --text: #F1F5F9;
+  --text-muted: #94A3B8;
+  
+  /* Neumorphism Shadows for Dark Mode */
+  --shadow-light: #1A2330; /* Lighter than surface */
+  --shadow-dark: #0A0D14;  /* Darker than surface */
+  
+  --nm-flat: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+  --nm-pressed: inset 6px 6px 12px var(--shadow-dark), inset -6px -6px 12px var(--shadow-light);
+  --nm-convex: linear-gradient(145deg, var(--shadow-light), var(--shadow-dark));
+  --nm-concave: linear-gradient(145deg, var(--shadow-dark), var(--shadow-light));
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--text);
+  font-family: 'Space Mono', monospace;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+code, pre {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Utilities */
+.nm-card {
+  background-color: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--nm-flat);
+  padding: 1.5rem;
+  transition: box-shadow 0.3s ease, background-color 0.3s ease;
+}
+
+.nm-button {
+  background-color: var(--surface);
+  color: var(--primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1.5rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--nm-flat);
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.nm-button:hover {
+  box-shadow: var(--nm-flat);
+  transform: translateY(-2px);
+}
+
+.nm-button:active {
+  box-shadow: var(--nm-pressed);
+  transform: translateY(0);
+}
+
+.nm-button-primary {
+  color: var(--surface);
+  background-color: var(--primary);
+  /* The shadow colors need to be derived from the primary color, but for simplicity, we keep the flat shadow */
+  box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+}
+
+.nm-button-primary:active {
+  box-shadow: inset 4px 4px 8px rgba(0,0,0,0.2), inset -4px -4px 8px rgba(255,255,255,0.2);
+}
+
+.nm-input {
+  background-color: var(--surface);
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  box-shadow: var(--nm-pressed);
+  font-family: inherit;
+  width: 100%;
+  outline: none;
+  transition: background-color 0.3s ease;
+}
+
+.nm-input::placeholder {
+  color: var(--text-muted);
+}
+
+.nm-input:focus {
+  /* Add subtle glow for focus visibility as per a11y requirements */
+  box-shadow: var(--nm-pressed), 0 0 0 2px var(--primary);
+}
+
+/* Base grid and containers */
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+@media (max-width: 1024px) {
+  .grid-cols-3, .grid-cols-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .grid-cols-2, .grid-cols-3, .grid-cols-4 { grid-template-columns: repeat(1, 1fr); }
+}
+
+/* Badge/Tag */
+.nm-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background-color: var(--surface);
+  box-shadow: var(--nm-flat);
+}
+
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+.text-warning { color: var(--warning); }
+.text-primary { color: var(--primary); }
+.text-muted { color: var(--text-muted); }
+
+/* Markdown Styling */
+.nm-markdown {
+  line-height: 1.6;
+}
+
+.nm-markdown h1, 
+.nm-markdown h2, 
+.nm-markdown h3, 
+.nm-markdown h4 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: var(--primary);
+}
+
+.nm-markdown h1 { font-size: 1.5rem; }
+.nm-markdown h2 { font-size: 1.25rem; }
+.nm-markdown h3 { font-size: 1.1rem; }
+
+.nm-markdown p {
+  margin-bottom: 1em;
+}
+
+.nm-markdown ul, 
+.nm-markdown ol {
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+}
+
+.nm-markdown li {
+  margin-bottom: 0.25em;
+}
+
+.nm-markdown strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.nm-markdown blockquote {
+  border-left: 4px solid var(--primary);
+  padding-left: 1em;
+  margin-left: 0;
+  margin-bottom: 1em;
+  color: var(--text-muted);
+  font-style: italic;
+}

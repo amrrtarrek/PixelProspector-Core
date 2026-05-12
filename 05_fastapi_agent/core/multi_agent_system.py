@@ -278,7 +278,7 @@ class PixelProspectorOrchestrator:
 
     def investor_agent(self, score: float, explanation: str, game_name: str, investor_name: str):
         """[BONUS] Multi-Agent: Investor Scouting Agent."""
-        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}' pitching the game '{game_name}'. Include a 'Subject:' line and a formal sign-off."
+        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}'. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
         prompt = PromptTemplate.from_template(template).format(
             score=score, 
             explanation=explanation,

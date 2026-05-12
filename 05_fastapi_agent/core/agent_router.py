@@ -28,7 +28,7 @@ for _p in ["01_data_ingestion", "03_supervised_ml", "04_forecasting"]:
 
 # ── Import Member 1 DB write helper ───────────────────────────────────
 try:
-    from db import write_record  # type: ignore
+    from db import write_record, get_engine, get_session, InteractionLog, DriftEvent  # type: ignore
 except ImportError:
     def write_record(data, engine=None):
         print(f"[MOCK DB] write_record called for {data.get('interaction_metadata', {}).get('game_id')}")
@@ -43,7 +43,19 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 FAISS_INDEX_PATH = os.path.join(os.path.dirname(__file__), "..", "02_unsupervised_ml", "pixel_prospector.index")
 RELIABILITY_THRESHOLD = 0.75 
 
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import hashlib
+
 app = FastAPI(title="PixelProspector V4.0 Orchestrator")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Member5-Main")
 
@@ -153,4 +165,110 @@ async def predict_game_success(payload: dict):
     if len(_recent_actions) > 50:
         _recent_actions.pop(0)
 
-    return result
+    return result
+
+# ── New Endpoints for React Dashboard ───────────────────────────────────────
+
+@app.get("/v1/logs")
+async def get_logs(limit: int = 50, triage_filter: str = "All"):
+    try:
+        engine = get_engine()
+        with get_session(engine) as session:
+            q = session.query(InteractionLog).order_by(InteractionLog.created_at.desc())
+            if triage_filter != "All":
+                q = q.filter(InteractionLog.triage_status == triage_filter)
+            rows = q.limit(limit).all()
+            return [
+                {**r.to_v40_dict(), "id": r.id, "created_at": str(r.created_at)}
+                for r in rows
+            ]
+    except Exception as e:
+        logger.error(f"Error fetching logs: {e}")
+        return []
+
+@app.get("/v1/drift_events")
+async def get_drift_events(limit: int = 20):
+    try:
+        engine = get_engine()
+        with get_session(engine) as session:
+            rows = session.query(DriftEvent).order_by(DriftEvent.detected_at.desc()).limit(limit).all()
+            return [
+                {
+                    "id": r.id,
+                    "detected_at": str(r.detected_at),
+                    "centroid_drift": r.centroid_drift,
+                    "gap_svm_trend": r.gap_svm_trend,
+                    "auto_healed": r.auto_healed,
+                    "notes": r.notes,
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.error(f"Error fetching drift events: {e}")
+        return []
+
+@app.get("/v1/cluster_health")
+async def get_cluster_health():
+    try:
+        engine = get_engine()
+        with get_session(engine) as session:
+            # Simple avg calculation by loading recent rows (or could be pure SQL)
+            rows = session.query(InteractionLog).order_by(InteractionLog.created_at.desc()).limit(100).all()
+            if not rows:
+                return {"game_features": {}, "user_features": {}}
+            
+            game_features = ["gameplay_addictiveness", "technical_polish", "aesthetic_appeal", "narrative_depth", "replayability", "viral_momentum"]
+            user_features = ["insight_depth", "toxicity_level", "genre_expertise", "sentiment_consistency"]
+            
+            avg_game = {f: sum(getattr(r, f) for r in rows)/len(rows) for f in game_features}
+            avg_user = {f: sum(getattr(r, f) for r in rows)/len(rows) for f in user_features}
+            
+            return {
+                "game_features": {k: round(v, 3) for k, v in avg_game.items()},
+                "user_features": {k: round(v, 3) for k, v in avg_user.items()}
+            }
+    except Exception as e:
+        logger.error(f"Error computing cluster health: {e}")
+        return {"game_features": {}, "user_features": {}}
+
+class ReviewSubmission(BaseModel):
+    review_text: str
+    game_name: str
+    user_id: str
+    genre: str
+    recommended: str
+
+@app.post("/v1/submit_review")
+async def submit_review(payload: ReviewSubmission):
+    try:
+        import sys as _sys
+        import os as _os
+        # Ensure 01_data_ingestion is in path
+        _sys.path.insert(0, str(_PROJECT_ROOT / "01_data_ingestion"))
+        from ingest import parse_user_review
+        
+        gen_game_id = "st_" + hashlib.md5(payload.game_name.strip().lower().encode()).hexdigest()[:8]
+        gemini_live = bool(os.environ.get("GEMINI_API_KEY", ""))
+        
+        result = parse_user_review(
+            review_text=payload.review_text.strip(),
+            game_name=payload.game_name.strip(),
+            game_id=gen_game_id,
+            user_id=payload.user_id.strip(),
+            recommended=(payload.recommended == "Yes"),
+            genre=payload.genre.strip() or "Uncategorized",
+            dry_run=not gemini_live,
+        )
+        
+        if result is None:
+            return {"status": "error", "message": "Analysis failed to produce a valid contract."}
+            
+        result["game_name"] = payload.game_name.strip()
+        
+        # Manually call our own predict function
+        predict_res = await predict_game_success(result)
+        return {"status": "success", "result": result, "predict": predict_res}
+        
+    except Exception as e:
+        logger.error(f"Submit review failed: {e}")
+        return {"status": "error", "message": str(e)}
