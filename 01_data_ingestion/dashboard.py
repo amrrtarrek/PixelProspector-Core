@@ -313,7 +313,6 @@ with tab_submit:
     col_left, col_right = st.columns([1, 1])
     with col_left:
         game_name  = st.text_input("Game name",   placeholder="e.g. The Witcher 3",  key="rv_game_name")
-        game_id    = st.text_input("Game ID",     placeholder="e.g. st_292030",      key="rv_game_id")
         user_id    = st.text_input("Your user ID",placeholder="e.g. user_xyz",       key="rv_user_id")
     with col_right:
         genre      = st.text_input("Genre",       placeholder="e.g. RPG",            key="rv_genre")
@@ -335,8 +334,6 @@ with tab_submit:
         errors = []
         if not game_name.strip():
             errors.append("Game name is required.")
-        if not game_id.strip():
-            errors.append("Game ID is required (e.g. st_292030).")
         if not user_id.strip():
             errors.append("User ID is required.")
         if len(review_text.strip()) < 20:
@@ -348,6 +345,10 @@ with tab_submit:
         else:
             with st.spinner("Analysing with Gemini…" if gemini_live else "Running heuristic analysis…"):
                 try:
+                    # Generate deterministic Game ID from Game Name
+                    import hashlib
+                    gen_game_id = "st_" + hashlib.md5(game_name.strip().lower().encode()).hexdigest()[:8]
+
                     # Import parse_user_review and write_record from our own modules
                     import sys as _sys
                     import os as _os
@@ -358,7 +359,7 @@ with tab_submit:
                     result = parse_user_review(
                         review_text = review_text.strip(),
                         game_name   = game_name.strip(),
-                        game_id     = game_id.strip(),
+                        game_id     = gen_game_id,
                         user_id     = user_id.strip(),
                         recommended = (recommended == "Yes"),
                         genre       = genre.strip() or "Uncategorized",
@@ -368,12 +369,15 @@ with tab_submit:
                     if result is None:
                         st.error("❌ Analysis failed — could not produce a valid V4.0 contract. Check logs.")
                     else:
+                        # Add game_name to payload so the orchestrator can use it for the investor email
+                        result["game_name"] = game_name.strip()
+                        
                         # Forward payload to FastAPI Agent so it calculates the 5 signals
                         db_msg = ""
                         res_data = {}
                         try:
                             import requests
-                            res = requests.post("http://localhost:8000/v1/predict", json=result, timeout=60)
+                            res = requests.post("http://localhost:8000/v1/predict", json=result, timeout=120)
 
                             if res.status_code == 200:
                                 res_data = res.json()

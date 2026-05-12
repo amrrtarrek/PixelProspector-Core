@@ -269,32 +269,35 @@ class OpenAIProvider:
 
 
 class GeminiProvider:
-    """Uses google-generativeai with response_mime_type + response_schema."""
+    """Uses google.genai with structured outputs."""
 
-    def __init__(self, model: str = "gemini-2.5-flash"):
+    def __init__(self, model: str = "gemini-3.1-flash-lite"):
         try:
-            import google.generativeai as genai  # type: ignore
+            from google import genai
+            from google.genai import types
+            self.genai = genai
+            self.types = types
         except ImportError as exc:
-            raise ImportError("Run: pip install google-generativeai") from exc
+            raise ImportError("Run: pip install google-genai") from exc
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY not set.")
-        genai.configure(api_key=api_key)
+        self.client = self.genai.Client(api_key=api_key)
         self.model_name = model
-        self.genai = genai
 
     def parse(self, row: dict) -> dict:
         import re
-        model = self.genai.GenerativeModel(
-            model_name=self.model_name,
+        config = self.types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
-            generation_config=self.genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.1,
-                max_output_tokens=1024,
-            ),
+            response_mime_type="application/json",
+            temperature=0.1,
+            max_output_tokens=1024,
         )
-        response = model.generate_content(_build_user_prompt(row))
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=_build_user_prompt(row),
+            config=config
+        )
         raw_text = response.text
 
         # gemini-2.5-flash may prepend thinking tokens before the JSON block.

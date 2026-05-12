@@ -4,7 +4,6 @@ import logging
 import importlib
 import json
 import faiss
-import google.generativeai as genai
 from typing import Any, List, Optional, Dict
 from pathlib import Path
 
@@ -78,16 +77,28 @@ class PixelGeminiLLM:
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         if not resolved_key:
             logger.warning("PixelGeminiLLM: No API key found. LLM calls will fail.")
-        genai.configure(api_key=resolved_key)
+        
+        try:
+            from google import genai
+            self.client = genai.Client(api_key=resolved_key)
+        except ImportError:
+            logger.error("Could not import google.genai. Make sure google-genai is installed.")
+            self.client = None
+            
         self.model_name = self._get_active_model_name()
-        self.model = genai.GenerativeModel(self.model_name)
 
     def _get_active_model_name(self):
         return "gemini-3.1-flash-lite"
 
     def invoke(self, prompt: str) -> str:
+        if not self.client:
+            return "Action: Strategic Review | Timing: 48h | Personalization: System fallback due to API error."
+            
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             return response.text.strip()
         except Exception as e:
             logger.error(f"LLM Invoke Error: {e}")
@@ -265,8 +276,61 @@ class PixelProspectorOrchestrator:
         prompt = PromptTemplate.from_template(template).format(features=json.dumps(features))
         return self.llm.invoke(prompt)
 
-    def investor_agent(self, score: float, explanation: str):
+    def investor_agent(self, score: float, explanation: str, game_name: str, investor_name: str):
         """[BONUS] Multi-Agent: Investor Scouting Agent."""
-        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investors pitching this game. Include a 'Subject:' line and a formal sign-off."
-        prompt = PromptTemplate.from_template(template).format(score=score, explanation=explanation)
-        return self.llm.invoke(prompt)
+        template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}' pitching the game '{game_name}'. Include a 'Subject:' line and a formal sign-off."
+        prompt = PromptTemplate.from_template(template).format(
+            score=score, 
+            explanation=explanation,
+            game_name=game_name,
+            investor_name=investor_name
+        )
+        email_content = self.llm.invoke(prompt)
+        
+        # Send email via SMTP right after generation
+        investor_email = os.environ.get("INVESTOR_EMAIL", "")
+        if investor_email:
+            # Parse subject from the generated content if possible
+            subject = f"Investment Opportunity: {game_name}"
+            for line in email_content.split('\n'):
+                if line.lower().startswith('subject:'):
+                    subject = line[len('subject:'):].strip()
+                    break
+            
+            # Helper function for SMTP
+            def send_email_via_smtp(to_email, subj, body):
+                import smtplib
+                from email.message import EmailMessage
+                smtp_server = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+                smtp_port = int(os.environ.get("SMTP_PORT", 587))
+                smtp_user = os.environ.get("SMTP_USERNAME")
+                smtp_pass = os.environ.get("SMTP_PASSWORD")
+                
+                if not all([smtp_user, smtp_pass, to_email]):
+                    logger.warning("SMTP credentials or to_email not set. Skipping email send.")
+                    return False
+                    
+                msg = EmailMessage()
+                msg.set_content(body)
+                msg['Subject'] = subj
+                msg['From'] = smtp_user
+                msg['To'] = to_email
+                
+                try:
+                    logger.info(f"Attempting to send SMTP email to {to_email} via {smtp_server}:{smtp_port}...")
+                    server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+                    server.quit()
+                    logger.info(f"Email successfully sent to {to_email}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to send email: {e}")
+                    return False
+            
+            logger.info("Triggering background email send...")
+            send_email_via_smtp(investor_email, subject, email_content)
+            logger.info("Email send process finished.")
+            
+        return email_content

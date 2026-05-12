@@ -116,7 +116,10 @@ async def predict_game_success(payload: dict):
 
     # 6. [BONUS] Multi-Agent Architecture (LangChain)
     community_profile = orchestrator.community_agent(raw_shap)
-    investor_pitch = orchestrator.investor_agent(intelligent_score, audit_explanation)
+    
+    game_name = payload.get("game_name", payload.get("interaction_metadata", {}).get("game_id", "Unknown Game"))
+    investor_name = os.environ.get("INVESTOR_NAME", "Valued Investor")
+    investor_pitch = orchestrator.investor_agent(intelligent_score, audit_explanation, game_name, investor_name)
 
     # 7. Final DB Sync
     payload["action_plan"] = final_action
