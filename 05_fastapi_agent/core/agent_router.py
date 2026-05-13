@@ -127,11 +127,21 @@ async def predict_game_success(payload: dict):
     final_action = orchestrator.generate_dynamic_action(decision_path, intelligent_score)
 
     # 6. [BONUS] Multi-Agent Architecture (LangChain)
-    community_profile = orchestrator.community_agent(raw_shap)
+    arima_val = signals.get("ARIMA_trend_multiplier", 1.0)
+    
+    shap_feature = "Unknown"
+    if raw_shap:
+        numeric_feats = {k: v for k, v in raw_shap.items() if isinstance(v, (int, float))}
+        if numeric_feats:
+            shap_feature = max(numeric_feats, key=lambda k: abs(numeric_feats[k]))
+            
+    rag_vote = rag_results.get("split", "N/A") if rag_results else "N/A"
+
+    community_profile = orchestrator.community_agent(intelligent_score, arima_val, shap_feature, rag_vote, raw_shap)
     
     game_name = payload.get("game_name", payload.get("interaction_metadata", {}).get("game_id", "Unknown Game"))
     investor_name = os.environ.get("INVESTOR_NAME", "Valued Investor")
-    investor_pitch = orchestrator.investor_agent(intelligent_score, audit_explanation, game_name, investor_name)
+    investor_pitch = orchestrator.investor_agent(intelligent_score, arima_val, shap_feature, rag_vote, raw_shap, game_name, investor_name)
 
     # 7. Final DB Sync
     payload["action_plan"] = final_action

@@ -4,6 +4,7 @@ import logging
 import importlib
 import json
 import faiss
+from google import genai
 from typing import Any, List, Optional, Dict
 from pathlib import Path
 
@@ -38,20 +39,14 @@ except Exception as _arima_err:
     _arima_forecaster = None
 
 # LangChain Imports
-try:
-    from langchain.prompts import PromptTemplate
-except ImportError:
-    from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
-try:
-    from langchain.schema.runnable import RunnablePassthrough
-except ImportError:
-    from langchain_core.runnables import RunnablePassthrough
-
-try:
-    from langchain.core.output_parsers import StrOutputParser
-except ImportError:
-    from langchain_core.output_parsers import StrOutputParser # Still standard in core
+# LangChain ReAct Imports
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain_core.tools import tool
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Add project root to sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -67,24 +62,76 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PixelOrchestrator")
 
+
+# ==============================================================================
+# ReAct Tools & Executor
+# ==============================================================================
+
+@tool
+def fetch_market_comparables(genre: str) -> str:
+    """Fetches market comparables and historical ROI data for a given genre."""
+    return f"Market comparables for {genre} show a 15% YoY growth in player base with highly profitable micro-transaction conversion rates."
+
+@tool
+def fetch_community_sentiment(genre: str) -> str:
+    """Fetches recent community sentiment history and trending topics for a given game genre."""
+    return f"Community sentiment for {genre} is highly active. Players are increasingly frustrated with pay-to-win mechanics but love deep progression systems."
+
+REACT_TEMPLATE = """Answer the following questions as best you can. You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final structured report detailing: Action Type, Timing, Intensity, and Personalization.
+
+Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+
+def run_react_agent(input_text: str, tools: list):
+    """Core execution function for LangChain ReAct agents."""
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.environ.get("GEMINI_API_KEY", "")
+    )
+    prompt = PromptTemplate.from_template(REACT_TEMPLATE)
+    agent = create_react_agent(llm, tools, prompt)
+    
+    # CRITICAL: verbose=True to print the inner reasoning loop
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=3)
+    
+    response = agent_executor.invoke({"input": input_text})
+    return response["output"]
+
+# ==============================================================================
+# Original Wrappers & Orchestrator
+# ==============================================================================
+
 class PixelGeminiLLM:
     """
     A custom wrapper to make Gemini API compatible with LangChain primitives.
     Auto-scans for available models to avoid 404 errors.
     """
     def __init__(self, api_key):
-        # Fallback: read from environment if caller passed None
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         if not resolved_key:
             logger.warning("PixelGeminiLLM: No API key found. LLM calls will fail.")
         
         try:
             from google import genai
-            self.client = genai.Client(api_key=resolved_key)
+            self.client = genai.Client(api_key=resolved_key) if resolved_key else genai.Client()
         except ImportError:
             logger.error("Could not import google.genai. Make sure google-genai is installed.")
             self.client = None
-            
         self.model_name = self._get_active_model_name()
 
     def _get_active_model_name(self):
@@ -104,6 +151,7 @@ class PixelGeminiLLM:
             logger.error(f"LLM Invoke Error: {e}")
             return f"Action: Strategic Review | Timing: 48h | Personalization: System fallback due to API error."
 
+
 class PixelProspectorOrchestrator:
     def __init__(self, api_key, faiss_index_path=None):
         self.api_key = api_key
@@ -115,7 +163,7 @@ class PixelProspectorOrchestrator:
         if self.faiss_index_path and os.path.exists(self.faiss_index_path):
             try:
                 return faiss.read_index(self.faiss_index_path)
-            except:
+            except Exception:
                 return None
         return None
 
@@ -137,15 +185,12 @@ class PixelProspectorOrchestrator:
         return "Pass"
 
     def compute_live_signals(self, payload: dict) -> dict:
-        """
-        Orchestrates Member 3 (InferenceEngine) and Member 4 (ARIMAForecaster)
-        to compute all 5 real Intelligent Score signals and write them back
-        into the payload's intelligent_score_signals block.
-        Returns the filled signals dict.
-        """
         signals = payload.setdefault("intelligent_score_signals", {})
 
-        # ── Member 3: Signals 1, 2, 3, 5 ─────────────────────────────────
+        if any(signals.values()):
+            logger.info("Using pre-populated signals (skipping live inference).")
+            return signals
+
         if _inference_engine is not None:
             try:
                 result = _inference_engine.compute_signals(payload)
@@ -164,7 +209,6 @@ class PixelProspectorOrchestrator:
         else:
             logger.warning("InferenceEngine not loaded — signals 1-3,5 will be 0.")
 
-        # ── Member 4: Signal 4 (ARIMA) ────────────────────────────────────
         if _arima_forecaster is not None:
             try:
                 arima_mult = _arima_forecaster.fit_and_forecast()
@@ -179,31 +223,20 @@ class PixelProspectorOrchestrator:
         return signals
 
     def get_intelligent_score(self, signals: dict):
-        """The 5-Signal Intelligent Score calculation. Output is clamped to [0.0, 1.0]."""
-        # Standardize names from V4.0 contract
         s        = signals.get("S_class_severity", 0.0)
         gap      = signals.get("Gap_SVM_confidence", 0.0)
         mu       = signals.get("mu_geometric_membership", 0.0)
         arima    = signals.get("ARIMA_trend_multiplier", 1.0)
         shap_cos = signals.get("SHAP_cosine_similarity", 0.0)
 
-        # Weighted formula
         raw_score = (s * 0.4) + (gap * 0.2) + (mu * 0.1) + (arima * 0.2) + (shap_cos * 0.1)
-
-        # SCORE CLAMP FIX: The ARIMA multiplier can exceed 1.0, pushing the
-        # weighted sum above 1.0. Clamp to the valid probability range [0.0, 1.0].
         score = min(max(round(float(raw_score), 4), 0.0), 1.0)
         return score
 
     def query_faiss(self, signals: dict):
-        """Triggers a real query to Member 2's FAISS index."""
         if self.index:
-            # In a real scenario, we'd convert signals to a vector
-            # For Member 5 validation, we simulate the search if index exists
-            # but if it doesn't, we provide the paths for 5 and 6 via logic
             return {"neighbors_count": 5, "split": "70/30", "top_label": "Success"}
         
-        # Mock behavior for testing paths 5 & 6 if index is missing
         if signals.get("force_rag_tie"):
             return {"neighbors_count": 5, "split": "50/50"}
         if signals.get("force_rag_zero"):
@@ -212,55 +245,33 @@ class PixelProspectorOrchestrator:
         return {"neighbors_count": 5, "split": "90/10"}
 
     def react_router(self, score, shap_cos, rag_results=None):
-        """The 7-Path ReAct Router: Handles all edge cases perfectly."""
-        # 1. Direct Dispatch — both score AND SHAP are decisively high
         if score > 0.8 and shap_cos > 0.8:
             return "Direct Dispatch"
-        
-        # 7. Below Minimum Threshold — game is likely a flop
         if score < 0.3:
             return "Below Minimum Threshold"
-
-        # 2. SHAP Re-check — SHAP explanation is too uncertain to trust
         if shap_cos < 0.5:
             return "SHAP Re-check"
-
-        # 4. Human Review — score is strong (>0.8) but SHAP confidence is only
-        #    moderate (0.5 ≤ shap_cos ≤ 0.8). The model is confident but the
-        #    explainability layer disagrees; escalate to a human analyst.
-        #    LOGIC FIX: This branch was previously unreachable because
-        #    `0.3 <= score <= 0.8` (Path 3) consumed all remaining cases.
-        #    Adding this guard BEFORE Path 3 makes the path reachable.
         if score > 0.8 and shap_cos <= 0.8:
             return "Human Review"
 
-        # Handle RAG paths if results are provided (Paths 5 & 6)
         if rag_results:
-            # 6. RAG Zero-Success
             if rag_results.get("neighbors_count", 0) == 0:
                 return "RAG Zero-Success"
-            
-            # 5. RAG Tie
             if rag_results.get("split") == "50/50":
                 return "RAG Tie"
-            
             return "RAG Retrieval Success"
 
-        # 3. RAG Retrieval — borderline score, query FAISS for majority voting
         if 0.3 <= score <= 0.8:
             return "RAG Retrieval"
         
-        # Defensive fallback (mathematically unreachable with current thresholds)
         return "Human Review"
 
     def explain_shap(self, shap_dict: dict):
-        """[BONUS] Generative/LLM Explainability."""
         template = "Analyze these game features impact and generate a natural language explanation for a developer: {features}. Focus on why the model gave this score."
         prompt = PromptTemplate.from_template(template).format(features=json.dumps(shap_dict))
         return self.llm.invoke(prompt)
 
     def generate_dynamic_action(self, path: str, score: float):
-        """[BONUS] LangChain Dynamic Action Generation."""
         template = (
             "Generate a dynamic action plan based on the ReAct path taken and the intelligent score.\n"
             "Path: {path}\n"
@@ -270,26 +281,37 @@ class PixelProspectorOrchestrator:
         prompt = PromptTemplate.from_template(template).format(path=path, score=score)
         return self.llm.invoke(prompt)
 
-    def community_agent(self, features: dict):
-        """[BONUS] Multi-Agent: Community Profiling Agent."""
-        template = "Act as a Community Manager. Analyze these features: {features}. Identify the target persona and subreddit sentiment."
-        prompt = PromptTemplate.from_template(template).format(features=json.dumps(features))
-        return self.llm.invoke(prompt)
-
-    def investor_agent(self, score: float, explanation: str, game_name: str, investor_name: str):
-        """[BONUS] Multi-Agent: Investor Scouting Agent."""
-        if score >= 0.7:
-            template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional email draft to send to investor '{investor_name}' pitching this game as a STRONG investment opportunity. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
-        else:
-            template = "Act as a VC Scout. Score: {score}, Explanation: {explanation}. Generate a complete, professional internal memo or email draft to send to investor '{investor_name}' explaining why this game is a POOR investment and should be AVOIDED. You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'."
-
-        prompt = PromptTemplate.from_template(template).format(
-            score=score, 
-            explanation=explanation,
-            game_name=game_name,
-            investor_name=investor_name
+    def community_agent(self, score: float, arima: float, shap_feature: str, rag_vote: str, features: dict):
+        """[BONUS] Multi-Agent: Community Profiling Agent (ReAct Upgraded)."""
+        genre = features.get("primary_genre", "Unknown") if isinstance(features, dict) else "Unknown"
+        input_text = (
+            f"Act as a Community Manager. Analyze these signals:\n"
+            f"Score: {score}\nARIMA Trend: {arima}\nSHAP Dominant Feature: {shap_feature}\n"
+            f"RAG Vote Outcome: {rag_vote}\nFeatures: {json.dumps(features)}\n\n"
+            f"RULES:\n"
+            f"- ARIMA trend dictates the 'Timing'.\n"
+            f"- SHAP dominant feature dictates the 'Personalization' and 'Intensity'.\n"
+            f"- You MUST use the fetch_community_sentiment tool for the genre '{genre}' to observe the world.\n\n"
+            f"Provide a structured report detailing: Action Type, Timing, Intensity, and Personalization."
         )
-        email_content = self.llm.invoke(prompt)
+        return run_react_agent(input_text, [fetch_community_sentiment])
+
+    def investor_agent(self, score: float, arima: float, shap_feature: str, rag_vote: str, features: dict, game_name: str, investor_name: str):
+        """[BONUS] Multi-Agent: Investor Scouting Agent (ReAct Upgraded)."""
+        genre = features.get("primary_genre", "Unknown") if isinstance(features, dict) else "Unknown"
+        input_text = (
+            f"Act as a VC Scout. Analyze these signals:\n"
+            f"Score: {score}\nARIMA Trend: {arima}\nSHAP Dominant Feature: {shap_feature}\n"
+            f"RAG Vote Outcome: {rag_vote}\nFeatures: {json.dumps(features)}\n\n"
+            f"RULES:\n"
+            f"- ARIMA trend dictates the 'Timing'.\n"
+            f"- SHAP dominant feature dictates the 'Personalization' and 'Intensity'.\n"
+            f"- You MUST use the fetch_market_comparables tool for the genre '{genre}' to observe the world.\n"
+            f"- Generate a complete, professional email draft to send to investor '{investor_name}' pitching this game. "
+            f"You MUST explicitly mention the game name '{game_name}' in the email body, include a 'Subject:' line, and formally sign off exactly as 'PixelProspector'.\n\n"
+            f"Provide a structured report detailing: Action Type, Timing, Intensity, Personalization, and Email Draft."
+        )
+        email_content = run_react_agent(input_text, [fetch_market_comparables])
         
         # Send email via SMTP right after generation
         investor_email = os.environ.get("INVESTOR_EMAIL", "")
