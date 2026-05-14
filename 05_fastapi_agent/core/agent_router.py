@@ -162,15 +162,24 @@ async def predict_game_success(payload: dict):
         "action_plan": final_action
     }
 
-    # Append to Zone 3 ring buffer (keep last 50)
+    # Append to Zone 3 ring buffer (keep last 50) — store full detail for drawer
     _recent_actions.append({
-        "timestamp":        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "game_id":          payload.get("interaction_metadata", {}).get("game_id", "?"),
-        "decision_path":    decision_path,
+        "timestamp":         datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "game_id":           payload.get("interaction_metadata", {}).get("game_id", "?"),
+        "game_name":         payload.get("game_name", payload.get("interaction_metadata", {}).get("game_id", "Unknown")),
+        "genre":             payload.get("interaction_metadata", {}).get("genre", ""),
+        "recommended":       payload.get("interaction_metadata", {}).get("recommended", None),
+        "decision_path":     decision_path,
         "intelligent_score": round(intelligent_score, 4),
-        "shap_cosine":      round(shap_cosine, 4),
-        "action_plan":      str(final_action)[:120],   # truncate for table display
-        "db_id":            row_id,
+        "shap_cosine":       round(shap_cosine, 4),
+        "action_plan":       str(final_action),          # full, untruncated
+        "llm_audit_log":     payload.get("llm_audit_log", ""),
+        "signals":           signals,
+        "community":         community_profile,
+        "investor_pitch":    investor_pitch,
+        "shap_raw_drivers":  signals.get("SHAP_raw_drivers", {}),
+        "raw_payload":       payload,
+        "db_id":             row_id,
     })
     if len(_recent_actions) > 50:
         _recent_actions.pop(0)

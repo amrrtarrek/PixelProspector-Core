@@ -253,7 +253,7 @@ class InferenceEngine:
 
     def _signal_5_shap_cosine(
         self, game_vector: np.ndarray, game_pred_label: str
-    ) -> float:
+    ) -> tuple[float, np.ndarray]:
         """
         SHAP Cosine Similarity = 1 - cosine_distance(live_shap, cluster_mean_shap)
         Measures prediction reliability by comparing the live data's SHAP
@@ -280,14 +280,14 @@ class InferenceEngine:
         if cluster_mean is None:
             log.warning("No cluster mean SHAP for '%s'; defaulting to 0.0",
                         game_pred_label)
-            return 0.0
+            return 0.0, live_shap
 
         # Guard against zero-norm vectors
         if np.linalg.norm(live_shap) < 1e-10 or np.linalg.norm(cluster_mean) < 1e-10:
-            return 0.0
+            return 0.0, live_shap
 
         similarity = 1.0 - cosine_distance(live_shap, cluster_mean)
-        return round(float(similarity), 4)
+        return round(float(similarity), 4), live_shap
 
     # ------------------------------------------------------------------
     # Public API
@@ -320,7 +320,9 @@ class InferenceEngine:
         s_dynamic = self._signal_1_dynamic_severity(game_proba, user_pred_class)
         gap_svm   = self._signal_2_gap_svm(game_proba)
         mu_geo    = self._signal_3_mu_geometric(game_vec.flatten())
-        shap_cos  = self._signal_5_shap_cosine(game_vec, game_label)
+        shap_cos, live_shap = self._signal_5_shap_cosine(game_vec, game_label)
+
+        shap_raw_drivers = {feat: float(live_shap[i]) for i, feat in enumerate(GAME_FEATURE_KEYS)}
 
         return {
             "intelligent_score_signals": {
@@ -328,6 +330,7 @@ class InferenceEngine:
                 "Gap_SVM_confidence":      gap_svm,
                 "mu_geometric_membership": mu_geo,
                 "SHAP_cosine_similarity":  shap_cos,
+                "SHAP_raw_drivers":        shap_raw_drivers,
                 # Signal 4 is filled by Member 4:
                 "ARIMA_trend_multiplier":  None,
             },

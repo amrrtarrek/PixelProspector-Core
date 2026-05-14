@@ -42,11 +42,14 @@ except Exception as _arima_err:
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+<<<<<<< HEAD
 
 # LangChain ReAct Imports
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+=======
+>>>>>>> 7c320b6 (feat: Implement comprehensive Audit Log detail modal with dynamic SHAP drivers, agent outputs, and ReAct flow diagram)
 
 # Add project root to sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -199,6 +202,7 @@ class PixelProspectorOrchestrator:
                 signals["Gap_SVM_confidence"]      = m3_signals.get("Gap_SVM_confidence", 0.0)
                 signals["mu_geometric_membership"] = m3_signals.get("mu_geometric_membership", 0.0)
                 signals["SHAP_cosine_similarity"]  = m3_signals.get("SHAP_cosine_similarity", 0.0)
+                signals["SHAP_raw_drivers"]        = m3_signals.get("SHAP_raw_drivers", {})
                 logger.info(
                     "Member 3 signals → S=%.3f Gap=%.3f Mu=%.3f SHAP=%.3f",
                     signals["S_class_severity"], signals["Gap_SVM_confidence"],
